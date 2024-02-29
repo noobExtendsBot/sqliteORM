@@ -4,26 +4,10 @@ orm package
 Submodules
 ----------
 
-orm.database module
--------------------
+orm.orm module
+--------------
 
-.. automodule:: orm.database
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-orm.fields module
------------------
-
-.. automodule:: orm.fields
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-orm.manager module
-------------------
-
-.. automodule:: orm.manager
+.. automodule:: orm.orm
    :members:
    :undoc-members:
    :show-inheritance:

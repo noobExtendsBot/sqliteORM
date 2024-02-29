@@ -1,6 +1,12 @@
-"""
-This module defines various field types for SQLite database and includes mappings for field and relationship types.
+from abc import ABC, abstractmethod
+try:
+    import sqlite3
+except Exception as e:
+    raise ImportError("Try installing sqlite3")
 
+
+# Fields section
+"""
 Attributes:
     __all__ (list): List of field types available in this module.
     field_mapper (dict): Mapping of field types to their corresponding SQLite data types.
@@ -18,9 +24,11 @@ Classes:
     BooleanField: Represents a field for storing boolean values.
     ImageField: Represents a field for storing image file paths.
     FileField: Represents a field for storing file paths.
-
-Functions:
-    No functions in this module.
+    DatabaseSchemaEditor: Schema editor for migrations.
+    MigrationManager: To handle all the operations related to Migrations.
+    QueryBuilder: Not implemented yet
+    QueryManager: Not implemented yet
+    Model: Base class for Models to be defined by users
 """
 
 from abc import ABC, abstractmethod
@@ -36,6 +44,15 @@ __all__ = [
     "BooleanField",
     "ImageField",
     "FileField",
+
+    # Database
+    "DataBaseConnector",
+    "MigrationManager",
+
+    # Query Manager
+    "QueryBuilder",
+    "QueryManager",
+    "Model",
 ]
 
 # Mapping of field types to corresponding SQLite data types
@@ -164,9 +181,10 @@ class CharField(Field):
         if self.primary_key:
             self._primary_key_checks()
         elif self.unique:
+            # enforce null as True bc some DB skip that
             self._unique_constraint_checks()
-        else:
-            self._default_value_checks()
+        elif (not self.null):
+            self._check_for_default_val()
 
     def _basic_checks(self):
         methods_to_check = [
@@ -186,23 +204,24 @@ class CharField(Field):
             self.null or (self.default is not None) or self.unique
         ):
             raise ValueError(
-                "When using primary_key=True, do not set null=True, unique=True, or provide a default value. Unique constraint is implied by primary key."
+                "When using primary_key=True, do not set anything other than max_length"
             )
 
     def _unique_constraint_checks(self):
-        if self.null and self.unique:
-            raise ValueError("On a unique field you can't set null as True")
-        if self.unique and (self.null or self.default):
+        # enforce null = True as DBs accept NULL in unique fields
+        print("asdas")
+        if self.unique and (self.default):
             raise ValueError(
                 "If using CharField as unique you can't give a default value"
             )
+        self.null = True
 
-    def _default_value_checks(self):
+    def _check_for_default_val(self):
         """
         Check if default value is required.
         """
         print(self.__str__())
-        if (not self.primary_key) and (not self.null) and (not self.default):
+        if  (not self.null) and (not self.default):
             raise ValueError(
                 "If null is False and primary_key=False, then it needs a default value"
             )
@@ -247,7 +266,7 @@ class CharField(Field):
             remaning_definition = self.remaning_definition()
             print(remaning_definition)
             sql = "".join([sql, remaning_definition])
-        print(sql)
+        # print(sql)
         return sql
 
     def __str__(self):
@@ -580,3 +599,264 @@ class FileField(Field):
             str: SQLite data type.
         """
         return f"TEXT"
+
+"""
+This module handles schema management and database connections.
+It is not intended for handling queries.
+"""
+
+class SingletonDBManagerMeta(type):
+    """
+    Metaclass for implementing a singleton pattern for the DataBaseConnector class.
+    """
+
+    _instance = None
+
+    def __call__(cls, *args, **kwargs):
+        if cls._instance is None:
+            instance = super().__call__(*args, **kwargs)
+            cls._instance = instance
+        return cls._instance
+
+
+class DataBaseConnector(metaclass=SingletonDBManagerMeta):
+    """
+    Singleton class for managing database connections.
+
+    Parameters:
+    - database_name (str): The name of the database.
+    - host (str, optional): The host of the database. Defaults to None.
+    - port (int, optional): The port of the database. Defaults to None.
+    - username (str, optional): The username for connecting to the database. Defaults to None.
+    - password (str, optional): The password for connecting to the database. Defaults to None.
+    """
+
+    _connection = None
+
+    def __init__(
+        self, database_name, host=None, port=None, username=None, password=None
+    ):
+        self._host = host
+        self._port = port
+        self._username = username
+        self._password = password
+        self._database_name = database_name
+
+        self.connect()
+
+    def connect(self):
+        """
+        Establish a connection to the database.
+
+        Raises:
+        - Exception: If the connection cannot be established.
+        """
+        if self._connection is None:
+            try:
+                self._connection = sqlite3.connect(self._database_name)
+            except Exception as e:
+                raise Exception(f"{e}")
+        return self._connection
+    
+    def exec_create_query(self, schema):
+        cursor = self._connection.cursor()
+        try:
+            for query in schema:
+                print(query)
+                cursor.execute(query)
+                self._connection.commit()
+        except Exception as e:
+            raise e
+        finally:
+            print("Tables Migrated")
+    
+
+    def close(self):
+        """Close the database connection."""
+        self._connection.close()
+
+
+class DatabaseSchemaEditor:
+    """
+    Class for handling database schema editing.
+
+    Attributes:
+    - sql_create_table (str): SQL template for creating a table.
+    - sql_alter_table (str): SQL template for altering a table.
+    - sql_delete_table (str): SQL template for deleting a table.
+    - sql_create_column (str): SQL template for creating a column in a table.
+    - sql_delete_column (str): SQL template for deleting a column from a table.
+    - sql_rename_column (str): SQL template for renaming a column in a table.
+    """
+
+    sql_create_table = "CREATE TABLE {table_name} ({definition});"
+    sql_alter_table = "ALTER TABLE {old_table_name} RENAME TO {new_table_name}"
+    sql_delete_table = "DROP TABLE {table_name} CASACDE"
+
+    sql_create_column = "ALTER TABLE {table_name} ADD {column_name} {definition}"
+    sql_delete_column = "ALTER TABLE {table_name} DROP COLUMN {column_name}"
+    sql_rename_column = (
+        "ALTER TABLE {table_name} RENAME COLUMN {old_name} to {new_name}"
+    )
+
+    def generate_table(self, table_name, definition):
+        """
+        Generate SQL for creating a table.
+
+        Parameters:
+        - table_name (str): Name of the table.
+        - definition (str): Definition of the table's columns.
+
+        Returns:
+        str: SQL for creating the table.
+        """
+        # print(table_name)
+        # print(definition)
+        return self.sql_create_table.format(table_name=table_name, definition=definition)
+
+
+class SingletonMigrationManager(type):
+    """
+    Metaclass for implementing a singleton pattern for the MigrationManager class.
+    NOTE: Since I have combined the file no need to have two different SingletonManager
+    _instances = {} will do the trick
+    """
+
+    _instance = None
+
+    def __call__(cls, *args, **kwargs):
+        if cls._instance is None:
+            instance = super().__call__(*args, **kwargs)
+            cls._instance = instance
+        return cls._instance
+
+
+class MigrationManager(DatabaseSchemaEditor, metaclass=SingletonMigrationManager):
+    """
+    Singleton class for managing database migrations.
+
+    Parameters:
+    - models (list): List of model classes for which migrations will be managed.
+
+    Attributes:
+    - migration_history: Placeholder for storing migration history.
+    """
+
+    def __init__(self, models):
+        """
+        Initialize the MigrationManager.
+
+        Parameters:
+        - models (list): List of model classes for which migrations will be managed.
+
+        Raises:
+        ValueError: If models is not a list.
+        """
+
+        if not isinstance(models, list):
+            raise ValueError("models should be a list of Models")
+        self.migration_history = None
+        self.models = models
+        self.migration = str()
+        self.schema = []
+        self._create_migrations()
+
+    def _create_migrations(self):
+        """
+        Create database migration scripts for the specified models.
+
+        Raises:
+        ValueError: If a model is not an instance of the Model class.
+        """
+        for model in self.models:
+            if not issubclass(model, Model):
+                raise ValueError("Make sure you inherit Model when creating Models")
+            else:
+                obj = model().get_column_details()
+                table_name = model()._get_table_name()
+                # table_query = f"{table_name} ({model.get_column_details()})"
+                table_query = self.generate_table(table_name=table_name, definition=model().get_column_details())
+                print(table_query)
+                self.schema.append(table_query)
+        print(self.schema)
+
+    def apply(self, connection):
+        """
+        Apply database migrations delegate work to DBConnector
+        """
+        connection.exec_create_query(schema=self.schema)
+        # DataBaseConnector.exec_create_query(schema=self.schema)
+
+
+"""
+This section has classes Related to Query and Model base class
+
+Attributes:
+    ``__all__`` (list): List of classes available in this module.
+    ``QueryBuilder``: Class for building queries to fetch data from the database.
+    ``QueryManager``: Class containing functions to execute queries.
+    ``Model``: Base class for building tables in the database.
+
+Classes:
+    ``QueryBuilder``: Class for building queries to fetch data from the database.
+    ``QueryManager``: Class containing functions to execute queries.
+    ``Model``: Base class for building tables in the database.
+
+"""
+
+class QueryBuilder:
+    """
+    Class for building queries to fetch data from the database.
+    """
+
+    pass
+
+
+class QueryManager:
+    """
+    Class containing functions to execute queries.
+    """
+
+    pass
+
+
+class Model:
+    """
+    Base class for building tables in the database.
+
+    Attributes:
+        ``_table_name`` (str): Name of the table in the database.
+
+    Methods:
+        ``__init__(**kwargs)``: Initializes a Model instance with field values.
+        ``create_table_sql()``: Generates SQL query for creating the table in the database.
+    """
+
+    _table_name = None
+    def __init__(self, **kwargs):
+        """
+        Initializes a Model instance with field values.
+
+        Parameters:
+            ``**kwargs``: Keyword arguments representing field names and values.
+        """
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+    
+    @classmethod
+    def _get_table_name(cls):
+        if cls._table_name:
+            return cls._table_name
+        else:
+            return (cls.__name__).lower()
+         
+    @classmethod
+    def get_column_details(cls):
+        sql_args = []
+        for field_name, field_obj in cls.__dict__.items():
+            if isinstance(field_obj, Field):
+                sql_args.append(" ".join([field_name, field_obj.to_sql()]))
+                # print(" ".join([field_name, field_obj.to_sql()]))
+        # print(", ".join(sql_args))
+        return ",".join(sql_args)
+

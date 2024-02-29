@@ -5,7 +5,7 @@ import sys
 
 sys.path.append("../")
 
-from orm.fields import CharField, TextField
+from orm.orm import CharField, TextField
 
 
 def test_char_field(caplog):
@@ -42,7 +42,7 @@ def test_char_field(caplog):
         (
             {"max_length": 10, "primary_key": True, "null": True},
             ValueError,
-            "When using primary_key=True, do not set null=True, unique=True, or provide a default value. Unique constraint is implied by primary key.",
+            "When using primary_key=True, do not set anything other than max_length",
             "",
         ),
         (
@@ -62,7 +62,7 @@ def test_char_field(caplog):
                 "null": False,
             },
             ValueError,
-            "When using primary_key=True, do not set null=True, unique=True, or provide a default value. Unique constraint is implied by primary key.",
+            "When using primary_key=True, do not set anything other than max_length",
             "",
         ),
         (
@@ -70,11 +70,11 @@ def test_char_field(caplog):
                 "max_length": 50,
                 "primary_key": False,
                 "unique": False,
-                "null": False,
+                "null": True,
             },
             ValueError,
-            "If null is False and primary_key=False, then it needs a default value",
             "",
+            "VARCHAR(50)",
         ),
         (
             {
@@ -85,7 +85,7 @@ def test_char_field(caplog):
                 "default": "some text",
             },
             ValueError,
-            "When using primary_key=True, do not set null=True, unique=True, or provide a default value. Unique constraint is implied by primary key.",
+            "When using primary_key=True, do not set anything other than max_length",
             "",
         ),
         (
@@ -122,7 +122,7 @@ def test_char_field(caplog):
             },
             ValueError,
             "",
-            "VARCHAR(50) NOT NULL UNIQUE",
+            "VARCHAR(50) UNIQUE",
         ),
         (
             {
@@ -133,7 +133,7 @@ def test_char_field(caplog):
                 "default": "None",
             },
             ValueError,
-            "On a unique field you can't set null as True",
+            "If using CharField as unique you can't give a default value",
             "",
         ),
         (
@@ -149,7 +149,6 @@ def test_char_field(caplog):
             "",
         ),
     ]
-
     for kwargs, expected_exception, expected_message, result in test_cases:
         try:
             # logging.info(CharField(**kwargs))
